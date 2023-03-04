@@ -1,2 +1,1 @@
-
-pub mod schafkopf;
+pub mod schafkopf_env;

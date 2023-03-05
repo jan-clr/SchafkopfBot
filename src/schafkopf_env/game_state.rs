@@ -112,6 +112,7 @@ pub enum Contract {
     Solo(Suit),
     Wenz,
     Ramsch,
+    None,
 }
 
 #[derive(Debug)]
@@ -137,7 +138,7 @@ impl Game {
         }
     }
 
-    pub fn player_state(&self, player_nr: u8) -> PlayerGameState {
+    pub fn get_player_game_state(&self, player_nr: u8) -> PlayerGameState {
         PlayerGameState {
             hand: &self.hands[player_nr as usize],
             contract: self.contract,
@@ -301,9 +302,30 @@ impl Game {
         };
     }
 
+    pub fn get_valid_actions<'a>(&'a self, hand: &'a Hand) -> Vec<&Card> {
+        hand.cards
+            .iter()
+            .filter(|c| self.action_is_valid(c, Some(hand)))
+            .collect()
+    }
+
     pub fn play_card(&mut self, card: Card) {
         self.played.push(card);
+        self.hands[self.next_player as usize].played.push(card);
+        self.hands[self.next_player as usize]
+            .cards
+            .retain(|c| c != &card);
         self.update_next_player();
+    }
+
+    pub fn is_ready_to_play(&self) -> bool {
+        self.played.len() == 0
+            && self.contract != Contract::None
+            && self.trick == 0
+            && self
+                .hands
+                .iter()
+                .all(|h| h.cards.len() == 8 && h.played.len() == 0)
     }
 }
 
@@ -355,6 +377,137 @@ fn is_trump(card: &Card, contract: &Contract) -> bool {
             card.suit == *suit || card.value == Value::Ober || card.value == Value::Under
         }
         Contract::Wenz => card.value == Value::Under,
+        Contract::None => false,
+    }
+}
+
+#[derive(Debug)]
+pub struct Auction {
+    pub highest_bid: Contract,
+    pub highest_bidder: u8,
+    pub next_bidder: Option<u8>,
+    pub intent: [bool; 4],
+    intent_count: u8,
+}
+
+impl Auction {
+    pub fn new(starting_bidder: u8) -> Auction {
+        Auction {
+            highest_bid: Contract::None,
+            highest_bidder: starting_bidder,
+            next_bidder: Some(starting_bidder),
+            intent: [false; 4],
+            intent_count: 0,
+        }
+    }
+
+    pub fn valid_bids(&self) -> Vec<Contract> {
+        let mut bids = vec![
+            Contract::Call(Suit::Acorns),
+            Contract::Call(Suit::Bells),
+            Contract::Call(Suit::Leaves),
+            Contract::Call(Suit::Hearts),
+            Contract::Solo(Suit::Acorns),
+            Contract::Solo(Suit::Bells),
+            Contract::Solo(Suit::Leaves),
+            Contract::Solo(Suit::Hearts),
+            Contract::Wenz,
+        ];
+        match self.highest_bid {
+            Contract::Call(_) => {
+                // if highest bid is a call -> remove all calls
+                bids.retain(|c| match c {
+                    Contract::Call(_) => false,
+                    _ => true,
+                });
+                bids.push(Contract::None);
+            }
+            Contract::Solo(_) => {
+                // if highest bid is a solo -> no bids possible
+                bids.clear();
+            }
+            Contract::Wenz => {
+                // if highest bid is a wenz -> remove wenz and calls
+                bids.retain(|c| match c {
+                    Contract::Wenz | Contract::Call(_) => false,
+                    _ => true,
+                });
+                bids.push(Contract::None);
+            }
+            // if highest bid is none -> no bids possible
+            _ => {}
+        }
+
+        bids
+    }
+
+    pub fn announce_intent(&mut self, intent: bool) {
+        if self.intent_count == 4 {
+            return;
+        }
+        self.intent[self.next_bidder.expect("Bidder must exist at this point.") as usize] = intent;
+        self.intent_count += 1;
+        self.update_next_bidder();
+    }
+
+    fn update_next_bidder(&mut self) {
+        if self.is_finished() {
+            self.next_bidder = None;
+        } else if self.intent_count < 4 {
+            self.next_bidder =
+                Some((self.next_bidder.expect("Bidder must exist at this point.") + 1) % 4);
+        } else {
+            let nr_bidders = self.intent.iter().filter(|i| **i).count();
+            if nr_bidders == 0 {
+                // no one wants to bid -> next bidder is none
+                self.next_bidder = None;
+                return;
+            }
+            if nr_bidders == 1 && self.highest_bid != Contract::None {
+                // contract declared and no contenders -> next bidder is none
+                self.next_bidder = None;
+                return;
+            }
+
+            // skip to next player with intent to bid
+            loop {
+                self.next_bidder =
+                    Some((self.next_bidder.expect("Bidder must exist at this point.") + 1) % 4);
+                if self.intent[self.next_bidder.expect("Bidder must exist at this point.") as usize]
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    pub fn bid(&mut self, bid: Contract) {
+        assert!(self.valid_bids().contains(&bid));
+        if let Contract::None = bid {
+            self.intent[self.next_bidder.expect("Bidder must exist at this point.") as usize] =
+                false;
+        } else {
+            self.highest_bid = bid;
+            self.highest_bidder = self.next_bidder.expect("Bidder must exist at this point.");
+        }
+        self.update_next_bidder();
+    }
+
+    // auction is finished if either all players have passed or no higher bid is possible
+    pub fn is_finished(&self) -> bool {
+        self.valid_bids().is_empty() || self.next_bidder.is_none()
+    }
+
+    pub fn winning_contract(&self) -> Contract {
+        if self.is_finished() {
+            if let Contract::None = self.highest_bid {
+                Contract::Ramsch
+            } else {
+                self.highest_bid
+            }
+        } else {
+            Contract::None
+        }
     }
 }
 
@@ -417,5 +570,69 @@ mod tests {
     fn test_call_matches_any() {
         let contract = Contract::Call(Suit::Acorns);
         assert!(matches!(contract, Contract::Call(_)));
+    }
+
+    #[test]
+    fn test_auction_one_bidder() {
+        let mut auction = Auction::new(0);
+        auction.announce_intent(false);
+        auction.announce_intent(false);
+        auction.announce_intent(false);
+        auction.announce_intent(true);
+        assert!(!auction.is_finished());
+        auction.bid(Contract::Call(Suit::Acorns));
+        assert_eq!(auction.winning_contract(), Contract::Call(Suit::Acorns));
+        assert_eq!(auction.highest_bidder, 3);
+    }
+
+    #[test]
+    fn test_auction_options_after_call_bid() {
+        let mut auction = Auction::new(0);
+        auction.announce_intent(false);
+        auction.announce_intent(false);
+        auction.announce_intent(true);
+        auction.announce_intent(true);
+        auction.bid(Contract::Call(Suit::Acorns));
+        assert_eq!(
+            auction.valid_bids(),
+            vec![
+                Contract::Solo(Suit::Acorns),
+                Contract::Solo(Suit::Bells),
+                Contract::Solo(Suit::Leaves),
+                Contract::Solo(Suit::Hearts),
+                Contract::Wenz,
+                Contract::None,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_auction_options_after_solo_bid() {
+        let mut auction = Auction::new(0);
+        auction.announce_intent(false);
+        auction.announce_intent(false);
+        auction.announce_intent(true);
+        auction.announce_intent(true);
+        auction.bid(Contract::Call(Suit::Acorns));
+        auction.bid(Contract::Solo(Suit::Acorns));
+        assert!(auction.valid_bids().is_empty(),);
+    }
+
+    use proptest::prelude::*;
+    proptest! {
+
+        #![proptest_config(ProptestConfig::with_cases(4))]
+        #[test]
+        fn test_auction_no_bids(sb in 0..4 as u8) {
+            println!("sb: {}", sb);
+            let mut auction = Auction::new(sb);
+            auction.announce_intent(false);
+            auction.announce_intent(false);
+            auction.announce_intent(false);
+            auction.announce_intent(false);
+            assert!(auction.is_finished());
+            assert_eq!(auction.winning_contract(), Contract::Ramsch);
+            assert_eq!(auction.highest_bidder, sb)
+        }
     }
 }

@@ -117,6 +117,7 @@ pub enum Contract {
 #[derive(Debug)]
 pub struct Game {
     trick: u8,
+    ran_away: bool,
     pub next_player: u8,
     pub played: Vec<Card>,
     pub hands: [Hand; 4],
@@ -128,6 +129,7 @@ impl Game {
         let mut dealer = Dealer::new();
         Game {
             trick: 0,
+            ran_away: false,
             next_player: 0,
             played: Vec::new(),
             hands: [dealer.deal(), dealer.deal(), dealer.deal(), dealer.deal()],
@@ -209,35 +211,99 @@ impl Game {
         }
     }
 
-    pub fn action_is_valid(&self, action: &Card, hand: &Hand) -> bool {
+    /// Checks if the given action is valid for the current game state and player hand.
+    /// If player hand is unknown, pass None.
+    /// In this case, almost all actions have to be considered valid and can only be checked after the game is over.
+    pub fn action_is_valid(&self, action: &Card, hand: Option<&Hand>) -> bool {
         let trick_cards = self
             .played
             .iter()
             .skip((self.trick * 4) as usize)
             .take(4)
             .collect::<Vec<&Card>>();
-        let contract = self.contract;
-        if trick_cards.len() == 0 {
-            match contract {
-                Contract::Call(suit) => {
-                    if action.suit == suit
+        let player_is_called = match self.contract {
+            Contract::Call(suit) => {
+                return if hand.is_none() {
+                    false
+                } else {
+                    let hand = hand.unwrap();
+                    action.suit == suit
                         && hand
                             .cards
                             .iter()
                             .any(|c| c.suit == suit && c.value == Value::Ace)
-                        && hand.cards.iter().filter(|c| c.suit == suit).count() < 4
-                    {
-                        return false;
-                    }
-                    todo!("Implement Laufsau rules")
                 }
-                _ => return true,
+            }
+            _ => false,
+        };
+        let can_run = match self.contract {
+            Contract::Call(suit) => {
+                return if hand.is_none() {
+                    false
+                } else {
+                    let hand = hand.unwrap();
+                    return action.suit == suit
+                        && hand.cards.iter().filter(|c| c.suit == suit).count() >= 4;
+                }
+            }
+            _ => false,
+        };
+        let called_suit = match self.contract {
+            Contract::Call(suit) => Some(suit),
+            _ => None,
+        };
+
+        // check leading card validity
+        if trick_cards.len() == 0 {
+            if player_is_called {
+                if Some(action.suit) == called_suit && action.value == Value::Ace && !self.ran_away
+                {
+                    // player is called and has not run away -> can't lead with called ace
+                    return false;
+                }
+                if Some(action.suit) == called_suit && !self.ran_away && !can_run {
+                    // player is called and hasn't and isn't able to run away -> can't lead with called suit
+                    return false;
+                }
+                // card is not in called suit -> can lead with it
+                // player can run away -> can lead with anything but called ace
+                // player has run away -> can lead with anything
+                return true;
             }
         }
+
         let leading_suit = trick_cards[0].suit;
         let lead_is_trump = is_trump(trick_cards[0], &self.contract);
 
-        false
+        let has_leading_suit =
+            hand.is_some() && hand.unwrap().cards.iter().any(|c| c.suit == leading_suit);
+        let has_trump = hand.is_some()
+            && hand
+                .unwrap()
+                .cards
+                .iter()
+                .any(|c| is_trump(c, &self.contract));
+        let leading_suit_is_called = Some(leading_suit) == called_suit;
+
+        // check non leading card validity
+        return if lead_is_trump && has_trump {
+            // lead is trump -> can only play trump
+            is_trump(action, &self.contract)
+        } else if leading_suit_is_called && player_is_called && !self.ran_away {
+            // player is called and leading suit is called -> must play called ace unless ran away already
+            action.suit == leading_suit && action.value == Value::Ace
+        } else if has_leading_suit {
+            // player has leading suit -> must play leading suit
+            action.suit == leading_suit
+        } else {
+            // player doesn't have leading suit -> can play anything
+            true
+        };
+    }
+
+    pub fn play_card(&mut self, card: Card) {
+        self.played.push(card);
+        self.update_next_player();
     }
 }
 

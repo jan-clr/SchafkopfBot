@@ -120,21 +120,24 @@ pub struct Game {
     trick: u8,
     ran_away: bool,
     pub next_player: u8,
-    pub played: Vec<Card>,
+    pub played: Vec<PlayedCard>,
     pub hands: [Hand; 4],
     pub contract: Contract,
 }
 
+#[derive(Debug)]
+pub struct PlayedCard(Card, u8);
+
 impl Game {
-    pub fn new() -> Game {
+    pub fn new(forehand_player: u8) -> Game {
         let mut dealer = Dealer::new();
         Game {
             trick: 0,
             ran_away: false,
-            next_player: 0,
+            next_player: forehand_player,
             played: Vec::new(),
             hands: [dealer.deal(), dealer.deal(), dealer.deal(), dealer.deal()],
-            contract: Contract::Call(Suit::Acorns),
+            contract: Contract::None,
         }
     }
 
@@ -159,46 +162,48 @@ impl Game {
             return None;
         }
 
-        let trick_cards = trick_cards.collect::<Vec<&Card>>();
-        let leading_suit = &trick_cards[0].suit;
+        let trick_cards = trick_cards.collect::<Vec<&PlayedCard>>();
+        let leading_suit = &trick_cards[0].0.suit;
 
-        let winner = trick_cards
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                let (a_is_trump, b_is_trump) =
-                    (is_trump(a, &self.contract), is_trump(b, &self.contract));
-                let (a_is_lead_suit, b_is_lead_suit) =
-                    (a.suit == *leading_suit, b.suit == *leading_suit);
-                if a_is_trump && !b_is_trump {
-                    // trump wins over non-trump
-                    return Ordering::Greater;
-                } else if !a_is_trump && b_is_trump {
-                    // trump wins over non-trump
-                    return Ordering::Less;
-                } else if a_is_trump && b_is_trump {
-                    // Ober and Under win against numbered trumps
-                    let mut cmp = a.value.cmp(&b.value);
-                    if cmp == Ordering::Equal {
-                        cmp = a.suit.cmp(&b.suit);
-                    }
-                    return cmp;
-                // neither cards are trumps
-                } else if a_is_lead_suit && !b_is_lead_suit {
-                    // lead suit wins over non-lead suit
-                    return Ordering::Greater;
-                } else if !a_is_lead_suit && b_is_lead_suit {
-                    // lead suit wins over non-lead suit
-                    return Ordering::Less;
-                } else if a_is_lead_suit && b_is_lead_suit {
-                    // higher value wins if both are lead suit
-                    return a.value.cmp(&b.value);
+        let winner = trick_cards.iter().max_by(|a, b| {
+            let (a_is_trump, b_is_trump) = (
+                is_trump(&a.0, &self.contract),
+                is_trump(&b.0, &self.contract),
+            );
+            let (a_is_lead_suit, b_is_lead_suit) =
+                (a.0.suit == *leading_suit, b.0.suit == *leading_suit);
+            if a_is_trump && !b_is_trump {
+                // trump wins over non-trump
+                return Ordering::Greater;
+            } else if !a_is_trump && b_is_trump {
+                // trump wins over non-trump
+                return Ordering::Less;
+            } else if a_is_trump && b_is_trump {
+                // Ober and Under win against numbered trumps
+                let mut cmp = a.0.value.cmp(&b.0.value);
+                if cmp == Ordering::Equal {
+                    cmp = a.0.suit.cmp(&b.0.suit);
                 }
-                return Ordering::Equal;
-            })
-            .map(|(i, _)| i as u8);
+                return cmp;
+            // neither cards are trumps
+            } else if a_is_lead_suit && !b_is_lead_suit {
+                // lead suit wins over non-lead suit
+                return Ordering::Greater;
+            } else if !a_is_lead_suit && b_is_lead_suit {
+                // lead suit wins over non-lead suit
+                return Ordering::Less;
+            } else if a_is_lead_suit && b_is_lead_suit {
+                // higher value wins if both are lead suit
+                return a.0.value.cmp(&b.0.value);
+            }
+            return Ordering::Equal;
+        });
 
-        winner
+        return if winner.is_some() {
+            Some(winner.unwrap().1)
+        } else {
+            None
+        };
     }
 
     fn update_next_player(&mut self) {
@@ -221,6 +226,7 @@ impl Game {
             .iter()
             .skip((self.trick * 4) as usize)
             .take(4)
+            .map(|c| &c.0)
             .collect::<Vec<&Card>>();
         let player_is_called = match self.contract {
             Contract::Call(suit) => {
@@ -310,7 +316,11 @@ impl Game {
     }
 
     pub fn play_card(&mut self, card: Card) {
-        self.played.push(card);
+        if !self.is_ready_to_play() {
+            println!("Game is not ready to play yet");
+            return;
+        }
+        self.played.push(PlayedCard(card, self.next_player));
         self.hands[self.next_player as usize].played.push(card);
         self.hands[self.next_player as usize]
             .cards
@@ -365,7 +375,7 @@ pub struct PlayerGameState<'a> {
     pub contract: Contract,
     pub player_nr: u8,
     pub trick: &'a u8,
-    pub played: &'a Vec<Card>,
+    pub played: &'a Vec<PlayedCard>,
 }
 
 fn is_trump(card: &Card, contract: &Contract) -> bool {
@@ -555,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_game_new() {
-        let game = Game::new();
+        let game = Game::new(0);
         assert_eq!(game.trick, 0);
         assert_eq!(game.next_player, 0);
         assert_eq!(game.played.len(), 0);

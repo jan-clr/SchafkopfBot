@@ -98,6 +98,17 @@ impl Card {
         cards.shuffle(&mut rand::thread_rng());
         cards
     }
+
+    pub fn points(&self) -> u8 {
+        match self.value {
+            Value::Ten => 10,
+            Value::Under => 2,
+            Value::Ober => 3,
+            Value::King => 4,
+            Value::Ace => 11,
+            _ => 0,
+        }
+    }
 }
 
 impl fmt::Display for Card {
@@ -119,31 +130,33 @@ pub enum Contract {
 pub struct Game {
     trick: u8,
     ran_away: bool,
-    pub next_player: u8,
+    pub next_player: usize,
+    pub declarer: usize,
     pub played: Vec<PlayedCard>,
     pub hands: [Hand; 4],
     pub contract: Contract,
 }
 
 #[derive(Debug)]
-pub struct PlayedCard(Card, u8);
+pub struct PlayedCard(Card, usize);
 
 impl Game {
-    pub fn new(forehand_player: u8) -> Game {
+    pub fn new(forehand_player: usize) -> Game {
         let mut dealer = Dealer::new();
         Game {
             trick: 0,
             ran_away: false,
             next_player: forehand_player,
+            declarer: 0,
             played: Vec::new(),
             hands: [dealer.deal(), dealer.deal(), dealer.deal(), dealer.deal()],
             contract: Contract::None,
         }
     }
 
-    pub fn get_player_game_state(&self, player_nr: u8) -> PlayerGameState {
+    pub fn get_player_game_state(&self, player_nr: usize) -> PlayerGameState {
         PlayerGameState {
-            hand: &self.hands[player_nr as usize],
+            hand: &self.hands[player_nr],
             contract: self.contract,
             player_nr,
             trick: &self.trick,
@@ -155,7 +168,7 @@ impl Game {
         self.trick = self.played.len() as u8 / 4;
     }
 
-    fn determine_trick_winner(&self, trick: u8) -> Option<u8> {
+    fn determine_trick_winner(&self, trick: u8) -> Option<usize> {
         let trick_cards = self.played.iter().skip((trick * 4) as usize).take(4);
 
         if trick_cards.len() < 4 {
@@ -308,7 +321,7 @@ impl Game {
         };
     }
 
-    pub fn get_valid_actions<'a>(&'a self, hand: &'a Hand) -> Vec<&Card> {
+    pub fn get_legal_actions<'a>(&'a self, hand: &'a Hand) -> Vec<&Card> {
         hand.cards
             .iter()
             .filter(|c| self.action_is_valid(c, Some(hand)))
@@ -337,6 +350,70 @@ impl Game {
                 .iter()
                 .all(|h| h.cards.len() == 8 && h.played.len() == 0)
     }
+
+    pub fn is_over(&self) -> bool {
+        self.played.len() == 32
+    }
+
+    pub fn get_points(&self) -> [u8; 4] {
+        let mut points = [0; 4];
+        for trick in 0..8 {
+            let trick_cards = self
+                .played
+                .iter()
+                .skip((trick * 4) as usize)
+                .take(4)
+                .map(|c| &c.0)
+                .collect::<Vec<&Card>>();
+            let trick_winner = self.determine_trick_winner(trick);
+            if trick_winner.is_some() {
+                let trick_winner = trick_winner.unwrap();
+                let trick_points = trick_cards.iter().fold(0, |acc, c| acc + c.points());
+                points[trick_winner as usize] += trick_points;
+            }
+        }
+        points
+    }
+
+    pub fn get_earnings(&self) -> [u32; 4] {
+        let points = self.get_points();
+        let mut earnings = [0; 4];
+        match self.contract {
+            Contract::Call(suit) => {
+                let called_player = self
+                    .hands
+                    .iter()
+                    .position(|h| {
+                        h.played
+                            .iter()
+                            .any(|c| c.suit == suit && c.value == Value::Ace)
+                    })
+                    .unwrap();
+
+                let player_points = points[called_player] + points[self.declarer];
+            }
+            _ => todo!(),
+        }
+
+        earnings
+    }
+}
+
+pub fn get_trump_order(contract: &Contract) -> Vec<Card> {
+    let deck = Card::deck();
+    let mut trumps = deck
+        .into_iter()
+        .filter(|c| is_trump(c, contract))
+        .collect::<Vec<Card>>();
+    trumps.sort_by(|a, b| {
+        let mut cmp = a.value.cmp(&b.value);
+        if cmp == Ordering::Equal {
+            cmp = a.suit.cmp(&b.suit);
+        }
+        return cmp;
+    });
+
+    trumps
 }
 
 struct Dealer {
@@ -373,7 +450,7 @@ impl Dealer {
 pub struct PlayerGameState<'a> {
     pub hand: &'a Hand,
     pub contract: Contract,
-    pub player_nr: u8,
+    pub player_nr: usize,
     pub trick: &'a u8,
     pub played: &'a Vec<PlayedCard>,
 }
@@ -394,14 +471,14 @@ fn is_trump(card: &Card, contract: &Contract) -> bool {
 #[derive(Debug)]
 pub struct Auction {
     pub highest_bid: Contract,
-    pub highest_bidder: u8,
-    pub next_bidder: Option<u8>,
+    pub highest_bidder: usize,
+    pub next_bidder: Option<usize>,
     pub intent: [bool; 4],
     intent_count: u8,
 }
 
 impl Auction {
-    pub fn new(starting_bidder: u8) -> Auction {
+    pub fn new(starting_bidder: usize) -> Auction {
         Auction {
             highest_bid: Contract::None,
             highest_bidder: starting_bidder,
@@ -411,7 +488,7 @@ impl Auction {
         }
     }
 
-    pub fn valid_bids(&self) -> Vec<Contract> {
+    pub fn valid_bids(&self, hand: Option<&Hand>) -> Vec<Contract> {
         let mut bids = vec![
             Contract::Call(Suit::Acorns),
             Contract::Call(Suit::Bells),
@@ -423,6 +500,7 @@ impl Auction {
             Contract::Solo(Suit::Hearts),
             Contract::Wenz,
         ];
+
         match self.highest_bid {
             Contract::Call(_) => {
                 // if highest bid is a call -> remove all calls
@@ -446,6 +524,28 @@ impl Auction {
             }
             // if highest bid is none -> no bids possible
             _ => {}
+        }
+
+        if hand.is_some() {
+            let hand = hand.unwrap();
+
+            // if player has the ace of a suit -> remove call for that suit
+            bids.retain(|c| match c {
+                Contract::Call(suit) => !hand
+                    .cards
+                    .iter()
+                    .any(|c| c.suit == *suit && c.value == Value::Ace),
+                _ => true,
+            });
+
+            // if player has no non trump cards of a suit -> remove call for that suit
+            bids.retain(|c| match c {
+                Contract::Call(suit) => hand
+                    .cards
+                    .iter()
+                    .any(|c| c.suit == *suit && !is_trump(c, &Contract::Call(*suit))),
+                _ => true,
+            });
         }
 
         bids
@@ -492,7 +592,7 @@ impl Auction {
     }
 
     pub fn bid(&mut self, bid: Contract) {
-        assert!(self.valid_bids().contains(&bid));
+        assert!(self.valid_bids(None).contains(&bid));
         if let Contract::None = bid {
             self.intent[self.next_bidder.expect("Bidder must exist at this point.") as usize] =
                 false;
@@ -503,9 +603,13 @@ impl Auction {
         self.update_next_bidder();
     }
 
+    pub fn bidding_phase_started(&self) -> bool {
+        self.intent_count == 4
+    }
+
     // auction is finished if either all players have passed or no higher bid is possible
     pub fn is_finished(&self) -> bool {
-        self.valid_bids().is_empty() || self.next_bidder.is_none()
+        self.valid_bids(None).is_empty() || self.next_bidder.is_none()
     }
 
     pub fn winning_contract(&self) -> Contract {
@@ -604,7 +708,7 @@ mod tests {
         auction.announce_intent(true);
         auction.bid(Contract::Call(Suit::Acorns));
         assert_eq!(
-            auction.valid_bids(),
+            auction.valid_bids(None),
             vec![
                 Contract::Solo(Suit::Acorns),
                 Contract::Solo(Suit::Bells),
@@ -625,7 +729,7 @@ mod tests {
         auction.announce_intent(true);
         auction.bid(Contract::Call(Suit::Acorns));
         auction.bid(Contract::Solo(Suit::Acorns));
-        assert!(auction.valid_bids().is_empty(),);
+        assert!(auction.valid_bids(None).is_empty(),);
     }
 
     use proptest::prelude::*;
@@ -633,7 +737,7 @@ mod tests {
 
         #![proptest_config(ProptestConfig::with_cases(4))]
         #[test]
-        fn test_auction_no_bids(sb in 0..4 as u8) {
+        fn test_auction_no_bids(sb in 0..4 as usize) {
             println!("sb: {}", sb);
             let mut auction = Auction::new(sb);
             auction.announce_intent(false);

@@ -1,0 +1,2 @@
+[build]
+target = 'hothead_web/index.html'

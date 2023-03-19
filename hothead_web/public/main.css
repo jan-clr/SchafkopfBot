@@ -1,9 +1,54 @@
+@font-face {
+    font-family: 'PublicPixel';
+    src: url('PublicPixel-z84yD.ttf');
+}
+
 body {
     margin: 20px;
     background: #000000;
     color: white;
+    font-family: PublicPixel, sans-serif;
+}
+
+.container {
+    display: grid;
+    grid-template-columns: [left] 1fr [center-left] 1fr [center-right] 1fr [right];
+    grid-template-rows: [top] 1fr [top-middle] 1fr [bottom-middle] 1fr [bottom];
+    grid-template-areas: '. . .'
+                         '. . .'
+                         '. hand .';
 }
 
 .heading {
     text-align: center;
 }
+
+
+.p-card {
+    height: 160px;
+    width: 90px;
+    border: 1px solid white;
+    text-align: center;
+    background: black;
+    position: relative;
+    left: -30px;
+    transition: 0.2s;
+}
+
+.p-card:hover {
+    transform: scale(1.1) translateY(-30px);
+    transition: 0.2s;
+    z-index: 10000;
+}
+
+.p-card.p-card-first {
+    position: relative;
+    left: 0;
+}
+
+.hand {
+    grid-area: hand;
+    display: flex;
+    justify-content: center;
+}
+

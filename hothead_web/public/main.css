@@ -16,7 +16,7 @@ body {
     grid-template-rows: [top] 1fr [top-middle] 1fr [bottom-middle] 1fr [bottom];
     grid-template-areas: '. . .'
                          '. . .'
-                         '. hand .';
+                         '. . .';
 }
 
 .heading {
@@ -41,14 +41,21 @@ body {
     z-index: 10000;
 }
 
-.p-card.p-card-first {
+.p-card:nth-child(1) {
     position: relative;
     left: 0;
 }
 
 .hand {
-    grid-area: hand;
+    position: absolute;
+    bottom: 10px;
+    left: 25%;
+    width: 50%;
     display: flex;
     justify-content: center;
+    background: aliceblue;
 }
+
+
+
 

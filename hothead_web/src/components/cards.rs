@@ -26,6 +26,7 @@ pub fn CardComp(props: &CardCompProps) -> Html {
     let y = use_state(|| 0);
     let start_x = use_state(|| 0);
     let start_y = use_state(|| 0);
+    let x_offset = if props.index == 0 { 0 } else { -30 };
 
     let onmousedown = {
         let dragging_handle = dragging_handle.clone();
@@ -34,7 +35,6 @@ pub fn CardComp(props: &CardCompProps) -> Html {
         let node_ref = card_ref.clone();
         Callback::from(move |e: MouseEvent| {
             dragging_handle.set(true);
-            log!("Drag start", *x, *y);
             if let Some(card_elem) = node_ref.cast::<HtmlDivElement>() {
                 card_elem.style().set_property("transition", "0s").unwrap();
             }
@@ -48,7 +48,6 @@ pub fn CardComp(props: &CardCompProps) -> Html {
         let start_y = start_y.clone();
 
         Callback::from(move |e: MouseEvent| {
-            log!("Drag end");
             dragging_handle.set(false);
             if let Some(card_elem) = node_ref.cast::<HtmlDivElement>() {
                 card_elem.style().remove_property("top").unwrap();
@@ -78,8 +77,7 @@ pub fn CardComp(props: &CardCompProps) -> Html {
             }
             if let Some(card_elem) = card_ref.cast::<HtmlDivElement>() {
                 let new_top = diff_y;
-                let new_left = diff_x;
-                log!(format!("{:?}", card_elem.style().length()));
+                let new_left = diff_x + x_offset;
                 card_elem
                     .style()
                     .set_property("left", &format!("{}px", new_left))

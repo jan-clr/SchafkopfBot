@@ -4,18 +4,20 @@
 }
 
 body {
-    margin: 20px;
+    margin: 0;
     background: #000000;
     color: white;
     font-family: PublicPixel, sans-serif;
 }
 
 .container {
+    height: 100svh;
+    width: 100%;
     display: grid;
     grid-template-columns: [left] 1fr [center-left] 1fr [center-right] 1fr [right];
     grid-template-rows: [top] 1fr [top-middle] 1fr [bottom-middle] 1fr [bottom];
     grid-template-areas: '. . .'
-                         '. . .'
+                         '. drop .'
                          '. . .';
 }
 
@@ -54,6 +56,11 @@ body {
     display: flex;
     justify-content: center;
     background: aliceblue;
+}
+
+.drop-zone {
+    grid-area: drop;
+    background: blueviolet;
 }
 
 

@@ -1,7 +1,5 @@
 use gloo::console::log;
 use schafkopf_lib::schafkopf_env::game_logic::Card;
-use stdweb::traits::IMouseEvent;
-use stdweb::web::event::MouseDownEvent;
 use web_sys::{HtmlDivElement, MouseEvent};
 use yew::prelude::*;
 
@@ -19,7 +17,7 @@ pub enum Msg {
 
 #[function_component]
 pub fn CardComp(props: &CardCompProps) -> Html {
-    let mut classes = vec!["p-card"];
+    let classes = vec!["p-card"];
     let dragging_handle = use_state(|| false);
     let card_ref = use_node_ref();
     let x = use_state(|| 0);
@@ -30,8 +28,6 @@ pub fn CardComp(props: &CardCompProps) -> Html {
 
     let onmousedown = {
         let dragging_handle = dragging_handle.clone();
-        let x = x.clone();
-        let y = y.clone();
         let node_ref = card_ref.clone();
         Callback::from(move |e: MouseEvent| {
             dragging_handle.set(true);
@@ -44,8 +40,6 @@ pub fn CardComp(props: &CardCompProps) -> Html {
     let onmouseup = {
         let dragging_handle = dragging_handle.clone();
         let node_ref = card_ref.clone();
-        let start_x = start_x.clone();
-        let start_y = start_y.clone();
 
         Callback::from(move |e: MouseEvent| {
             dragging_handle.set(false);
@@ -69,7 +63,6 @@ pub fn CardComp(props: &CardCompProps) -> Html {
             let diff_y = new_y - *start_y;
             x.set(new_x);
             y.set(new_y);
-            //log!("Drag", *x, *y);
             if !*dragging_handle {
                 start_x.set(new_x);
                 start_y.set(new_y);

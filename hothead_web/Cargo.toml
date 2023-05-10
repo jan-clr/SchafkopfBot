@@ -12,3 +12,4 @@ getrandom = { version = "0.2", features = ["js"] }
 gloo = "0.8.0"
 web-sys = { version = "0.3.61", features = ["Element", "CssStyleDeclaration", "HtmlDivElement", "MouseEvent"] }
 stdweb = "0.4.20"
+yewdux = "0.9"
